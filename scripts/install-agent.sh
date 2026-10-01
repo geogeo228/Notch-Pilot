@@ -20,7 +20,9 @@ fi
 
 BIN="${HOME}/Applications/Notch Pilot.app/Contents/MacOS/NotchPilot"
 [ -x "$BIN" ] || { echo "❌ Build first: scripts/build.sh"; exit 1; }
-SB="$PWD/scripts/sandbox.sb"
+# Embed the profile inline (-p): launchd agents can't read files under
+# ~/Desktop (TCC), so `-f scripts/sandbox.sb` fails with EPERM.
+SB_INLINE="$(tr '\n' ' ' < scripts/sandbox.sb)"
 
 pkill -x NotchPilot 2>/dev/null || true
 mkdir -p "$(dirname "$PLIST")"
@@ -33,8 +35,8 @@ cat > "$PLIST" <<PLIST
     <key>ProgramArguments</key>
     <array>
         <string>/usr/bin/sandbox-exec</string>
-        <string>-f</string>
-        <string>${SB}</string>
+        <string>-p</string>
+        <string>${SB_INLINE}</string>
         <string>${BIN}</string>
     </array>
     <key>RunAtLoad</key><true/>
