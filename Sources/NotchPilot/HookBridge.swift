@@ -325,9 +325,13 @@ final class HookBridge: ObservableObject {
     /// Load / mutate / save the settings.json atomically. The mutator can
     /// return `nil` to abort the write (no-op).
     private func mutateSettings(_ mutate: (inout [String: Any]) -> [String: Any]?) {
+        // Same rule as HookInstaller: if the file exists but can't be
+        // parsed, leave it alone rather than overwriting it with {}.
         var settings: [String: Any] = [:]
-        if let data = try? Data(contentsOf: URL(fileURLWithPath: settingsPath)),
-           let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+        if FileManager.default.fileExists(atPath: settingsPath) {
+            guard let data = try? Data(contentsOf: URL(fileURLWithPath: settingsPath)),
+                  let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else { return }
             settings = parsed
         }
         guard let updated = mutate(&settings) else { return }
@@ -341,7 +345,7 @@ final class HookBridge: ObservableObject {
             withJSONObject: updated,
             options: [.prettyPrinted, .sortedKeys]
         ) {
-            try? data.write(to: URL(fileURLWithPath: settingsPath))
+            try? data.write(to: URL(fileURLWithPath: settingsPath), options: .atomic)
         }
     }
 }
