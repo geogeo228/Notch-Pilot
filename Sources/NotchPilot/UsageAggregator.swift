@@ -57,7 +57,7 @@ final class UsageAggregator: ObservableObject {
         week.earliestTimestamp.map { $0.addingTimeInterval(7 * 24 * 3600) }
     }
 
-    private let refreshInterval: TimeInterval = 60
+    private let refreshInterval: TimeInterval = 300  // Georgi fork: was 60
     /// When a previous fetch failed (or we never got live data at all)
     /// we want to retry much sooner than the steady-state 60 s. Without
     /// this the user would stare at a blank "—" pill for up to a full
@@ -102,7 +102,10 @@ final class UsageAggregator: ObservableObject {
             // a live reading yet — the typical cause of a missing live
             // reading is a transient token-refresh window, and we
             // want the pill to come alive again quickly.
-            let interval = (live == nil) ? retryInterval : refreshInterval
+            // Georgi fork: the live API is stubbed out, so `live` is always
+            // nil — upstream's fast retry would rescan every jsonl (hundreds
+            // of MB) every 10 s and pin a core. Use the steady interval only.
+            let interval = refreshInterval
             let elapsed = Date().timeIntervalSince(last)
             if elapsed < interval {
                 print(String(
