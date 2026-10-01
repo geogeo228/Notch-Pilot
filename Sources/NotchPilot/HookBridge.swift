@@ -253,8 +253,7 @@ final class HookBridge: ObservableObject {
     /// same tool name auto-approve. Persists to `~/.claude/settings.json`
     /// (`permissions.allow`) and updates the in-memory mirror.
     func allowAlways(_ permission: PendingPermission) {
-        alwaysAllowedTools.insert(permission.toolName)
-        appendToSettingsAllow(toolName: permission.toolName)
+        // Georgi fork: no persistence — behaves like a one-time Allow.
         resolve(permission, behavior: "allow")
     }
 

@@ -105,36 +105,11 @@ cat > "${APP_DIR}/Contents/Info.plist" <<EOF
 </plist>
 EOF
 
-# Sign the bundle. We use a self-signed certificate with a stable CN
-# ("Notch Pilot Dev") so macOS recognizes the app across updates for
-# permissions like Accessibility. Ad-hoc signing (codesign --sign -)
-# generates a new identity on every build, which revokes grants.
-CERT_CN="Notch Pilot Dev"
-echo "▶ Signing bundle..."
-if security find-identity -v -p codesigning | grep -q "${CERT_CN}"; then
-    echo "   Using existing '${CERT_CN}' certificate"
-    codesign --sign "${CERT_CN}" --force --deep "${APP_DIR}"
-else
-    echo "   '${CERT_CN}' certificate not found — creating self-signed cert..."
-    # Create a temporary keychain for CI or use the login keychain
-    CERT_FILE="$(mktemp -d)/cert.pem"
-    KEY_FILE="$(mktemp -d)/key.pem"
-    openssl req -x509 -newkey rsa:2048 -keyout "${KEY_FILE}" -out "${CERT_FILE}" \
-        -days 3650 -nodes -subj "/CN=${CERT_CN}" 2>/dev/null
-    security import "${CERT_FILE}" -k ~/Library/Keychains/login.keychain-db -T /usr/bin/codesign 2>/dev/null || true
-    security import "${KEY_FILE}" -k ~/Library/Keychains/login.keychain-db -T /usr/bin/codesign 2>/dev/null || true
-    rm -f "${CERT_FILE}" "${KEY_FILE}"
-    # Allow codesign to use the key without prompting
-    security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" ~/Library/Keychains/login.keychain-db 2>/dev/null || true
-    sleep 1
-    if security find-identity -v -p codesigning | grep -q "${CERT_CN}"; then
-        echo "   ✓ Certificate created. Signing..."
-        codesign --sign "${CERT_CN}" --force --deep "${APP_DIR}"
-    else
-        echo "   ⚠ Certificate creation failed — falling back to ad-hoc signing"
-        codesign --sign - --force --deep "${APP_DIR}"
-    fi
-fi
+# Georgi fork: ad-hoc signing only. Upstream imported a self-signed
+# cert into the login keychain and ran `security set-key-partition-list`
+# on it. Trade-off: macOS may ask to re-grant Accessibility after a rebuild.
+echo "▶ Signing bundle (ad-hoc)..."
+codesign --sign - --force --deep "${APP_DIR}"
 
 # Verify architecture and signature
 echo ""

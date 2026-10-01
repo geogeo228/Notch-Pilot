@@ -29,6 +29,7 @@ enum TerminalJumper {
         "Hyper",
         "Rio",
         "tabby",
+        "zed", "Zed",              // Georgi fork: Zed's built-in terminal
     ]
 
     /// Known terminal bundle identifiers — used as a fallback when the
@@ -48,6 +49,8 @@ enum TerminalJumper {
         "co.zeit.hyper",
         "com.raphaelamorim.rio",
         "org.tabby",
+        "dev.zed.Zed",             // Georgi fork
+        "dev.zed.Zed-Preview",
     ]
 
     /// Jump to the terminal window hosting the claude process running

@@ -85,10 +85,12 @@ final class GlobalHotkeys: ObservableObject {
 
     private func handleKey(_ event: NSEvent) {
         // Only respond to ⌘+key (no other modifiers like shift/ctrl/option)
+        // Georgi fork: ⌥⌘ instead of bare ⌘ — plain ⌘. is too easy to hit
+        // by accident and would approve a pending command from any app.
         guard event.modifierFlags.contains(.command),
+              event.modifierFlags.contains(.option),
               !event.modifierFlags.contains(.shift),
-              !event.modifierFlags.contains(.control),
-              !event.modifierFlags.contains(.option)
+              !event.modifierFlags.contains(.control)
         else { return }
 
         switch event.charactersIgnoringModifiers {

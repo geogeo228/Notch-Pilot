@@ -1680,7 +1680,7 @@ struct NotchContentView: View {
         HStack(spacing: 8) {
             PermissionButton(
                 label: "Deny",
-                shortcut: "⌘,",
+                shortcut: "⌥⌘,",
                 style: .ghost,
                 accent: accent,
                 action: { hookBridge.deny(permission) }
@@ -1688,26 +1688,15 @@ struct NotchContentView: View {
 
             PermissionButton(
                 label: "Allow",
-                shortcut: "⌘.",
+                shortcut: "⌥⌘.",
                 style: .primary,
                 accent: accent,
                 action: { hookBridge.allow(permission) }
             )
         }
 
-        Button { hookBridge.allowAlways(permission) } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "checkmark.shield")
-                    .font(.system(size: 10, weight: .semibold))
-                Text("Always allow ") + Text(permission.toolName).fontWeight(.semibold)
-            }
-            .font(.system(size: 11, weight: .medium, design: .rounded))
-            .foregroundColor(.white.opacity(0.55))
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 7)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
+        // Georgi fork: "Always allow <Tool>" removed — it whitelisted the
+        // whole tool (e.g. every Bash command) in settings.json.
     }
 
     // MARK: - Permission helpers
@@ -2705,7 +2694,7 @@ struct NotchContentView: View {
                 Text("Keyboard shortcuts disabled")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundColor(.white.opacity(0.9))
-                Text("Grant Accessibility access to enable ⌘. ⌘, ⌘\\")
+                Text("Grant Accessibility access to enable ⌥⌘. ⌥⌘, ⌥⌘\\")
                     .font(.system(size: 10))
                     .foregroundColor(.white.opacity(0.5))
             }
