@@ -240,7 +240,10 @@ final class BuddyPreferences: ObservableObject {
     func applyStartAtLogin() {
         let service = SMAppService.mainApp
         do {
-            if startAtLogin {
+            // Georgi fork: never register as a login item — that would
+            // launch the app outside the no-network sandbox. Autostart is
+            // the LaunchAgent from scripts/install-agent.sh.
+            if false {
                 if service.status != .enabled {
                     try service.register()
                     print("[NotchPilot] Registered as login item")
@@ -397,7 +400,7 @@ final class BuddyPreferences: ObservableObject {
         // Voice master defaults off so new users don't get surprised.
         voiceEnabled = defaults.object(forKey: Self.voiceKey) as? Bool ?? false
         alwaysVisible = defaults.object(forKey: Self.alwaysVisibleKey) as? Bool ?? true
-        startAtLogin = defaults.object(forKey: Self.startAtLoginKey) as? Bool ?? true
+        startAtLogin = false  // Georgi fork: see applyStartAtLogin()
         hapticsEnabled = defaults.object(forKey: Self.hapticsKey) as? Bool ?? true
         speechEnabled = defaults.object(forKey: Self.speechKey) as? Bool ?? true
         suppressPermissionWhenFocused = defaults.object(forKey: Self.suppressPermKey) as? Bool ?? false

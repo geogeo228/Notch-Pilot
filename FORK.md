@@ -15,15 +15,23 @@
 | Глобальные ⌘. / ⌘, разрешали/отклоняли из любого приложения | ⌥⌘. / ⌥⌘, / ⌥⌘\ |
 | `build.sh` импортировал самоподписанный сертификат в login keychain | Ad-hoc подпись, Keychain не трогается |
 | Zed не знал | Zed добавлен в список терминалов |
+| AskUserQuestion: только первый вопрос, один вариант, ответ через «deny» (в терминале «Denied by PermissionRequest hook») | Все вопросы пачки по очереди, мультивыбор, «Свой вариант…» с вводом текста; ответ штатно — allow + `answers` |
+| Без live-лимитов пересчитывал 400+ МБ логов каждые 10 с (CPU 100%) | Пересчёт раз в 5 мин |
+| «Start at login» через SMAppService — запуск БЕЗ песочницы | Отключено; автозапуск — LaunchAgent в песочнице |
+| Хуки указывали в `dist/`, который стирается при сборке | Сборка ставит приложение в `~/Applications`, хуки смотрят туда |
 
 В коде нет ни одного `URLSession`/`URLRequest`.
 
 ## Сборка и запуск
 
 ```sh
-nice -n 10 scripts/build.sh      # → dist/Notch Pilot.app (только Command Line Tools)
-scripts/run-offline.sh           # запуск в sandbox: весь IP-трафик запрещён, unix-сокет хуков работает
+nice -n 10 scripts/build.sh      # собрать (только Command Line Tools) и поставить в ~/Applications
+scripts/install-agent.sh         # один раз: автозапуск при входе, всегда в песочнице без сети
+scripts/run-offline.sh           # перезапуск после пересборки
+scripts/install-agent.sh --uninstall   # убрать автозапуск
 ```
+
+Песочница — `scripts/sandbox.sb`: весь IP-трафик запрещён, unix-сокет хуков работает.
 
 Плюс LuLu: если он когда-нибудь спросит про NotchPilot — значит, что-то пытается в сеть, блокировать.
 

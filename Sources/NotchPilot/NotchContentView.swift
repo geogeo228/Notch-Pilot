@@ -2130,7 +2130,7 @@ struct NotchContentView: View {
     private func permissionPanel(_ permission: PendingPermission) -> some View {
         let shape = surfaceShape(bottomCornerRadius: 28)
 
-        let isQuestion = permission.isAskUserQuestion && !permission.askOptions.isEmpty
+        let isQuestion = permission.isAskUserQuestion && !permission.askQuestions.isEmpty
 
         return VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 12) {
@@ -2168,7 +2168,15 @@ struct NotchContentView: View {
             }
 
             if isQuestion {
-                questionBody(permission)
+                // Georgi fork: all questions, multi-select, own answer.
+                AskQuestionsView(
+                    permission: permission,
+                    accent: accent,
+                    accentBorder: accentBorder,
+                    onSubmit: { hookBridge.submitAnswers(permission, answers: $0) },
+                    onCancel: { hookBridge.deny(permission) }
+                )
+                .id(permission.id)
             } else {
                 standardPermissionBody(permission)
             }
@@ -2947,13 +2955,8 @@ struct NotchContentView: View {
                 isOn: $prefs.alwaysVisible
             )
 
-            behaviorRow(
-                iconOn: "power",
-                iconOff: "power",
-                title: "Start at login",
-                subtitle: "Auto-launch Notch Pilot when you log in",
-                isOn: $prefs.startAtLogin
-            )
+            // Georgi fork: "Start at login" removed — autostart goes through
+            // the sandboxed LaunchAgent (scripts/install-agent.sh) instead.
 
             behaviorRow(
                 iconOn: "hand.tap.fill",

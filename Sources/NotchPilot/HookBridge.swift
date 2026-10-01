@@ -234,6 +234,21 @@ final class HookBridge: ObservableObject {
     /// the PermissionRequest deny `message` field is surfaced to the model
     /// as tool feedback. So we deny the tool and phrase the message as a
     /// direct answer — the LLM reads it and continues as if the tool ran.
+    /// Georgi fork: answer AskUserQuestion natively — allow the tool with
+    /// `updatedInput` = original input + `answers` ({question text: answer}).
+    /// Claude Code then returns these answers as a normal tool result
+    /// (no "Denied by PermissionRequest hook"), for every question in the
+    /// batch, including multi-select and free-text answers.
+    func submitAnswers(_ permission: PendingPermission, answers: [String: String]) {
+        var updated = permission.toolInput
+        updated["answers"] = answers
+        permission.respond(SocketServer.Response(payload: [
+            "behavior": "allow",
+            "updatedInput": updated
+        ]))
+        removeFromQueue(id: permission.id)
+    }
+
     func selectQuestionOption(_ permission: PendingPermission, option: AskOption) {
         let answer: String
         if let desc = option.description, !desc.isEmpty {
@@ -337,6 +352,15 @@ struct AskOption: Identifiable, Hashable {
     let description: String?
 }
 
+/// Georgi fork: one question of an AskUserQuestion batch (1–4 per call).
+struct AskQuestion: Identifiable {
+    let id: Int
+    let text: String
+    let header: String
+    let options: [AskOption]
+    let multiSelect: Bool
+}
+
 struct PendingPermission: Identifiable {
     let id: UUID
     let toolName: String
@@ -394,6 +418,30 @@ struct PendingPermission: Identifiable {
         if let q = toolInput["prompt"] as? String { return q }
         if let q = toolInput["header"] as? String { return q }
         return ""
+    }
+
+    /// Georgi fork: every question in the batch, not just the first.
+    /// Falls back to the legacy single-question shape.
+    var askQuestions: [AskQuestion] {
+        if let arr = toolInput["questions"] as? [[String: Any]] {
+            let parsed: [AskQuestion] = arr.enumerated().compactMap { idx, q in
+                let text = (q["question"] as? String) ?? (q["prompt"] as? String) ?? ""
+                let header = (q["header"] as? String) ?? ""
+                let opts = parseOptionList(q["options"]) ?? []
+                guard !(text.isEmpty && header.isEmpty), !opts.isEmpty else { return nil }
+                return AskQuestion(
+                    id: idx,
+                    text: text.isEmpty ? header : text,
+                    header: header,
+                    options: opts,
+                    multiSelect: (q["multiSelect"] as? Bool) ?? false
+                )
+            }
+            if !parsed.isEmpty { return parsed }
+        }
+        let opts = askOptions
+        guard !opts.isEmpty else { return [] }
+        return [AskQuestion(id: 0, text: question, header: "", options: opts, multiSelect: false)]
     }
 
     var askOptions: [AskOption] {

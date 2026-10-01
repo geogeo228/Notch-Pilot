@@ -123,3 +123,14 @@ echo "   Size: $(du -sh "${APP_DIR}" | cut -f1)"
 echo ""
 echo "To test: open '${APP_DIR}'"
 echo "To package: scripts/make-dmg.sh"
+
+# Georgi fork: install to a stable location so Claude Code hooks don't
+# point into dist/ (which this script wipes on every rebuild).
+INSTALL_DIR="${HOME}/Applications"
+mkdir -p "${INSTALL_DIR}"
+echo "▶ Installing to ${INSTALL_DIR}/${APP_NAME}.app"
+rm -rf "${INSTALL_DIR}/${APP_NAME}.app.new"
+ditto "${APP_DIR}" "${INSTALL_DIR}/${APP_NAME}.app.new"
+rm -rf "${INSTALL_DIR}/${APP_NAME}.app"
+mv "${INSTALL_DIR}/${APP_NAME}.app.new" "${INSTALL_DIR}/${APP_NAME}.app"
+echo "   Restart with: scripts/run-offline.sh"
