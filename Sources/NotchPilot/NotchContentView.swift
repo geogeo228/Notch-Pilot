@@ -2257,13 +2257,18 @@ struct NotchContentView: View {
         releaseTask?.cancel()
         releaseTask = nil
         NotchWindow.setKeyboardFocus(false)
-        permissionSuppressed = true
         expanded = false
         if jumpToTerminal {
+            // "В чат": hand it back to Claude Code entirely — the notch
+            // forgets it, hover shows the normal panel again.
+            hookBridge.dismissToTerminal(permission)
             TerminalJumper.jump(
                 toCwd: permission.cwd,
                 claudePID: hookBridge.sessionPIDs[permission.sessionID]
             )
+        } else {
+            // Mouse-out: hide but keep (pulse + reopen on hover).
+            permissionSuppressed = true
         }
     }
 

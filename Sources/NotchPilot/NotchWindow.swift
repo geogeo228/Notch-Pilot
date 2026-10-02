@@ -36,6 +36,7 @@ final class NotchWindow: NSPanel {
     /// onChange(of:effectivelyExpanded) doesn't have the collapse
     /// callback clobber the expand animation.
     private var isExpanded = false
+    private static let dragEnabled = false  // Georgi fork
     /// True between the drag-threshold being crossed and mouseUp. While
     /// set, frame updates from prefs/state callbacks are suppressed so
     /// we don't fight the drag.
@@ -170,6 +171,10 @@ final class NotchWindow: NSPanel {
         // on hover.
         mouseMonitor.anchorRectProvider = { [weak self] in
             self?.currentPillRect ?? .zero
+        }
+        // Georgi fork: real click-through for the fixed-size window.
+        mouseMonitor.onTick = { [weak self] in
+            self?.updateMouseThrough()
         }
 
         // Re-position when the user picks a different zone or the
@@ -463,6 +468,12 @@ final class NotchWindow: NSPanel {
             isUserDragging = false
             super.sendEvent(event)
         case .leftMouseDragged:
+            // Georgi fork: dragging disabled — the pill lives at the notch,
+            // and a click with a tiny mouse move used to drag it away.
+            guard Self.dragEnabled else {
+                super.sendEvent(event)
+                return
+            }
             let cursor = NSEvent.mouseLocation
             let dx = cursor.x - dragStartMouseInScreen.x
             let dy = cursor.y - dragStartMouseInScreen.y
@@ -655,15 +666,32 @@ final class NotchWindow: NSPanel {
         // transition on the collapsed pill. The window just needs to:
         //   1) be ordered onto the screen so SwiftUI has somewhere to draw
         //   2) let mouse events through while nothing is visible
+        isShown = visible
         if visible {
-            self.ignoresMouseEvents = false
             self.alphaValue = 1
             if !self.isVisible {
                 orderFrontRegardless()
             }
+            updateMouseThrough()
         } else {
             self.ignoresMouseEvents = true
         }
+    }
+
+    /// Georgi fork: the notch-mode window is a fixed 560×460 strip, and a
+    /// view-level hitTest returning nil does NOT pass clicks to other
+    /// apps — the window server already routed the click to us. So the
+    /// whole window ignores the mouse unless the cursor is over the pill
+    /// (collapsed) or the panel (expanded). Polled from MouseMonitor.
+    private var isShown = false
+    private func updateMouseThrough() {
+        guard isShown, !isUserDragging else {
+            if !isShown && !ignoresMouseEvents { ignoresMouseEvents = true }
+            return
+        }
+        let active = isExpanded ? frame : currentPillRect.insetBy(dx: -6, dy: -6)
+        let ignore = !active.contains(NSEvent.mouseLocation)
+        if ignoresMouseEvents != ignore { ignoresMouseEvents = ignore }
     }
 
     private func updateCollapsed(size: CGSize) {

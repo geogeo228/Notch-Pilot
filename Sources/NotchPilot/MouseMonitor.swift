@@ -29,6 +29,9 @@ final class MouseMonitor: ObservableObject {
     private let notchHeight: CGFloat
     private var timer: Timer?
     private var fullscreenTickCounter = 0
+    /// Georgi fork: called every poll so NotchWindow can toggle
+    /// click-through based on where the cursor is.
+    var onTick: (() -> Void)?
 
     init(notchWidth: CGFloat, notchHeight: CGFloat) {
         self.notchWidth = notchWidth
@@ -59,6 +62,7 @@ final class MouseMonitor: ObservableObject {
         if inside != isHoveringNotch {
             isHoveringNotch = inside
         }
+        onTick?()
 
         // AX queries cost a few ms of IPC — only poll fullscreen
         // state once per second, not every 100ms.

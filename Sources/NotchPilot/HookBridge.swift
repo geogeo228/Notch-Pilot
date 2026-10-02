@@ -239,6 +239,14 @@ final class HookBridge: ObservableObject {
     /// Claude Code then returns these answers as a normal tool result
     /// (no "Denied by PermissionRequest hook"), for every question in the
     /// batch, including multi-select and free-text answers.
+    /// Georgi fork: "answer in chat" — give the request back to Claude Code
+    /// with no decision. The hook exits silently, Claude Code keeps its own
+    /// terminal dialog, and the notch forgets the request.
+    func dismissToTerminal(_ permission: PendingPermission) {
+        permission.respond(SocketServer.Response(payload: [:]))
+        removeFromQueue(id: permission.id)
+    }
+
     func submitAnswers(_ permission: PendingPermission, answers: [String: String]) {
         var updated = permission.toolInput
         updated["answers"] = answers
