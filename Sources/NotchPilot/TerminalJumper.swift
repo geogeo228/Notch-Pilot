@@ -120,8 +120,8 @@ enum TerminalJumper {
     /// which is wrong with several windows (often fullscreen on other Spaces,
     /// invisible to Accessibility). Instead pick the open workspace whose
     /// folder best contains the session cwd (from Zed's own workspace db)
-    /// and ask Zed's CLI to open that folder: Zed focuses the existing
-    /// window and switches Space. Returns false if not Zed / no match.
+    /// and ask Zed to open that folder (`open -a`): Zed focuses the
+    /// existing window and switches Space. Returns false if not Zed / no match.
     private static func focusZedWindow(app: NSRunningApplication, cwd: String) -> Bool {
         guard let bid = app.bundleIdentifier, bid.hasPrefix("dev.zed.Zed"),
               let bundleURL = app.bundleURL else { return false }
@@ -143,9 +143,11 @@ enum TerminalJumper {
             .max { $0.count < $1.count }
         guard let root = match else { return false }
 
-        let cli = bundleURL.appendingPathComponent("Contents/MacOS/cli").path
-        guard FileManager.default.isExecutableFile(atPath: cli),
-              let opened = ProcessRunner.run(cli, [root], timeout: 3),
+        // Not Zed's own `cli`: it refuses to run inside sandbox-exec
+        // ("cannot start app bundle"), and the fork runs sandboxed.
+        // LaunchServices `open -a` hands Zed the folder the same way.
+        guard let opened = ProcessRunner.run(
+                  "/usr/bin/open", ["-a", bundleURL.path, root], timeout: 3),
               opened.status == 0
         else { return false }
         print("[NotchPilot] Focused Zed window for \(root)")
