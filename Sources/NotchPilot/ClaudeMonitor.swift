@@ -552,16 +552,25 @@ final class ClaudeMonitor: ObservableObject {
         return counts
     }
 
+    /// Georgi fork: count claude processes via libproc instead of spawning
+    /// `pgrep -fl claude` every second on the main thread. Spawning cost
+    /// ~60 ms per tick (fork/exec + pipe), i.e. ~4 dropped frames a second
+    /// — visible as stutter. Same matching rules as TerminalJumper.
     private func countClaudeProcesses() -> Int {
-        guard let result = ProcessRunner.run("/usr/bin/pgrep", ["-fl", "claude"]),
-              let text = String(data: result.stdout, encoding: .utf8)
-        else { return 0 }
-
-        return text.split(whereSeparator: \.isNewline).filter { line in
-            let s = String(line).lowercased()
-            guard !s.contains("notch") else { return false }
-            return s.contains("claude")
-        }.count
+        var count = 0
+        for pid in ProcessLookup.allPIDs() where pid > 0 {
+            let name = (ProcessLookup.name(of: pid) ?? "").lowercased()
+            if name.contains("notch") { continue }
+            if name.contains("claude") {
+                count += 1
+                continue
+            }
+            if let exe = ProcessLookup.path(of: pid)?.lowercased(),
+               exe.contains("/claude/versions/") || exe.hasSuffix("/claude") {
+                count += 1
+            }
+        }
+        return count
     }
 
     // MARK: - Session detail timeline
