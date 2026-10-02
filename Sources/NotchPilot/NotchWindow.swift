@@ -306,6 +306,26 @@ final class NotchWindow: NSPanel {
         return NSRect(x: x, y: panelY, width: w, height: h)
     }
 
+    /// Georgi fork: notch mode uses one fixed frame for collapsed AND
+    /// expanded, so the expand animation is pure SwiftUI (no per-frame
+    /// window resize + full re-layout). Transparent area passes clicks
+    /// via hitShape.
+    private func fixedNotchFrame() -> NSRect {
+        let f = currentScreen.frame
+        let w = Self.expandedPanelWidth
+        let h = Self.expandedPanelHeight
+        return NSRect(x: f.midX - w / 2, y: f.maxY - h, width: w, height: h)
+    }
+
+    /// Georgi fork: collapsed click region. In notch mode the window is
+    /// taller than the pill, so limit the region to the pill strip.
+    private var collapsedHitShape: ClickThroughHostingView<AnyView>.HitShape {
+        let size = lastCollapsedSize
+        return isHardwareNotchAnchored(on: currentScreen)
+            ? .centered(width: size.width, offsetX: lastPillOffsetX, height: size.height)
+            : .centered(width: size.width, offsetX: lastPillOffsetX)
+    }
+
     /// Y of the collapsed pill in screen coords (AppKit, bottom-left
     /// origin). Honors `pinToTopEdge` — when false we use the saved
     /// `notchAnchorYFromTop` and clamp so the pill stays on screen.
@@ -390,6 +410,15 @@ final class NotchWindow: NSPanel {
     private func repositionForCurrentState() {
         guard !isUserDragging else { return }
         guard !suppressPrefsReposition else { return }
+        // Georgi fork: notch mode — fixed frame, no animation. Also
+        // refresh the click region: the mode may have just flipped
+        // (drag release / screen change).
+        if isHardwareNotchAnchored(on: currentScreen) {
+            let target = fixedNotchFrame()
+            if frame != target { setFrame(target, display: true) }
+            clickHost.hitShape = isExpanded ? .full : collapsedHitShape
+            return
+        }
         let target: NSRect
         if isExpanded {
             target = expandedFrame()
@@ -403,6 +432,8 @@ final class NotchWindow: NSPanel {
             ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
             self.animator().setFrame(target, display: true)
         }
+        // Georgi fork: leaving notch mode — drop the pill-strip height.
+        clickHost.hitShape = isExpanded ? .full : collapsedHitShape
     }
 
     /// If the saved screen has been unplugged, drop the saved ID so the
@@ -643,26 +674,37 @@ final class NotchWindow: NSPanel {
         // toggling) from racing the expand and snapping the window
         // back to pill-height.
         if isExpanded { return }
-        let target = collapsedFrame(size: size)
-        NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.28
-            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            self.animator().setFrame(target, display: true)
+        if isHardwareNotchAnchored(on: currentScreen) {
+            // Georgi fork: notch mode — fixed frame, no animation.
+            let target = fixedNotchFrame()
+            if frame != target { setFrame(target, display: true) }
+        } else {
+            let target = collapsedFrame(size: size)
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.28
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                self.animator().setFrame(target, display: true)
+            }
         }
-        clickHost.hitShape = .centered(width: size.width, offsetX: lastPillOffsetX)
+        clickHost.hitShape = collapsedHitShape
     }
 
     private func updateExpanded(_ expanded: Bool) {
         isExpanded = expanded
-        let target = expanded ? expandedFrame() : collapsedFrame(size: lastCollapsedSize)
-        NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.22
-            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            self.animator().setFrame(target, display: true)
+        if isHardwareNotchAnchored(on: currentScreen) {
+            // Georgi fork: notch mode — the frame stays put; SwiftUI's
+            // scale transition does the expand/collapse.
+            let target = fixedNotchFrame()
+            if frame != target { setFrame(target, display: true) }
+        } else {
+            let target = expanded ? expandedFrame() : collapsedFrame(size: lastCollapsedSize)
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.22
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                self.animator().setFrame(target, display: true)
+            }
         }
-        clickHost.hitShape = expanded
-            ? .full
-            : .centered(width: lastCollapsedSize.width, offsetX: lastPillOffsetX)
+        clickHost.hitShape = expanded ? .full : collapsedHitShape
     }
 
     /// Track the SwiftUI pill's horizontal offset so the click hit
@@ -672,10 +714,7 @@ final class NotchWindow: NSPanel {
         guard offset != lastPillOffsetX else { return }
         lastPillOffsetX = offset
         if !isExpanded {
-            clickHost.hitShape = .centered(
-                width: lastCollapsedSize.width,
-                offsetX: offset
-            )
+            clickHost.hitShape = collapsedHitShape
         }
     }
 }
@@ -698,7 +737,10 @@ final class ClickThroughHostingView<Content: View>: NSView {
         /// centered in the window plus an optional `offsetX` so the
         /// hit region tracks the pill when SwiftUI shifts it (e.g.
         /// silhouette mode with asymmetric slot widths).
-        case centered(width: CGFloat, offsetX: CGFloat = 0)
+        /// Georgi fork: optional `height` limits the region to a strip
+        /// at the TOP edge (notch mode, fixed 560×460 window); nil =
+        /// whole window height (floating mode, as before).
+        case centered(width: CGFloat, offsetX: CGFloat = 0, height: CGFloat? = nil)
     }
 
     let hosting: NSHostingView<Content>
@@ -725,12 +767,16 @@ final class ClickThroughHostingView<Content: View>: NSView {
             return nil
         case .full:
             region = bounds
-        case .centered(let width, let offsetX):
+        case .centered(let width, let offsetX, let height):
+            // Georgi fork: notch mode — the window is a fixed 560×460
+            // strip and only the pill at the TOP edge should take clicks
+            // (AppKit y is bottom-up). nil height = whole window.
+            let h = height ?? bounds.height
             region = CGRect(
                 x: (bounds.width - width) / 2 + offsetX,
-                y: 0,
+                y: bounds.height - h,
                 width: width,
-                height: bounds.height
+                height: h
             )
         }
         guard region.contains(point) else { return nil }
