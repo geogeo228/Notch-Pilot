@@ -107,6 +107,13 @@ actor ClaudeScanner {
                 // so skip it. It will appear on a subsequent tick.
                 guard !parsed.cwd.isEmpty else { continue }
 
+                // Georgi fork: match on the session's LAUNCH cwd. Each jsonl
+                // entry records the cwd at that moment, which follows the
+                // agent's `cd`s (subfolders, worktrees) — but the claude
+                // process (what liveClaudeCwdCounts sees) stays in the launch
+                // dir. Using the last entry made sessions flicker/vanish.
+                let sessionCwd = launchCwd(jsonlURL) ?? parsed.cwd
+
                 // Sticky context token + window update: remember the
                 // last observed token count and lock the window to 1M
                 // if we've ever seen > 190k on this session.
@@ -119,7 +126,7 @@ actor ClaudeScanner {
                     }
                 }
 
-                let projectName = (parsed.cwd as NSString).lastPathComponent
+                let projectName = (sessionCwd as NSString).lastPathComponent
                 let startTime: Date = {
                     if let attrs = try? fm.attributesOfItem(atPath: jsonlURL.path),
                        let created = attrs[.creationDate] as? Date {
@@ -134,7 +141,7 @@ actor ClaudeScanner {
                     projectName: projectName,
                     projectPath: projectURL.path,
                     jsonlPath: jsonlURL.path,
-                    cwd: ProcessLookup.normalize(parsed.cwd),
+                    cwd: ProcessLookup.normalize(sessionCwd),
                     startTime: startTime,
                     lastActivity: lastActivity,
                     parsed: parsed
@@ -169,7 +176,7 @@ actor ClaudeScanner {
                     id: c.sessionID,
                     projectName: c.projectName,
                     projectPath: c.projectPath,
-                    cwd: c.parsed.cwd,
+                    cwd: c.cwd,
                     startTime: c.startTime,
                     lastActivity: c.lastActivity,
                     lastMessage: c.parsed.message,
@@ -189,8 +196,30 @@ actor ClaudeScanner {
         parseCache = parseCache.filter { livePaths.contains($0.key) }
         stickyContextTokens = stickyContextTokens.filter { livePaths.contains($0.key) }
         stickyContextWindow = stickyContextWindow.filter { livePaths.contains($0.key) }
+        launchCwdCache = launchCwdCache.filter { livePaths.contains($0.key) }
 
         return result.sorted { $0.lastActivity > $1.lastActivity }
+    }
+
+    /// Georgi fork: launch cwd per jsonl (first entry with a cwd). It never
+    /// changes for a session, so it's cached forever.
+    private var launchCwdCache: [String: String] = [:]
+
+    private func launchCwd(_ url: URL) -> String? {
+        if let cached = launchCwdCache[url.path] { return cached }
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        let head = handle.readData(ofLength: 64 * 1024)
+        guard let text = String(data: head, encoding: .utf8) else { return nil }
+        for line in text.split(separator: "\n") {
+            guard let data = line.data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let cwd = obj["cwd"] as? String, !cwd.isEmpty
+            else { continue }
+            launchCwdCache[url.path] = cwd
+            return cwd
+        }
+        return nil
     }
 
     private func mtime(_ url: URL) -> Date? {
