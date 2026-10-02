@@ -11,8 +11,11 @@ struct AskQuestionsView: View {
     let permission: PendingPermission
     let accent: Color
     let accentBorder: Color
+    /// Set once the user starts answering, so mouse-out won't release it.
+    @Binding var engaged: Bool
     let onSubmit: ([String: String]) -> Void
-    let onCancel: () -> Void
+    /// "Answer in chat": hide the notch panel, keep the request pending.
+    let onRelease: () -> Void
 
     @State private var index = 0
     @State private var selected: [Int: Set<Int>] = [:]
@@ -79,11 +82,10 @@ struct AskQuestionsView: View {
             if index > 0 {
                 footerButton("Назад", primary: false) { go(to: index - 1) }
             }
-            footerButton("Отмена", primary: false) {
+            footerButton("В чат", primary: false) {
                 NotchWindow.setKeyboardFocus(false)
-                onCancel()
+                onRelease()
             }
-            .keyboardShortcut(.cancelAction)
             if current.multiSelect || editingOther || hasAnswer(current.id) {
                 footerButton(isLast ? "Ответить" : "Далее", primary: true) { advance() }
                     .disabled(!hasAnswer(current.id))
@@ -140,7 +142,7 @@ struct AskQuestionsView: View {
         if editingOther {
             TextField("Свой ответ…", text: Binding(
                 get: { otherText[current.id] ?? "" },
-                set: { otherText[current.id] = $0 }
+                set: { otherText[current.id] = $0; engaged = true }
             ))
             .textFieldStyle(.plain)
             .font(.system(size: 12, design: .rounded))
@@ -160,6 +162,7 @@ struct AskQuestionsView: View {
         } else {
             Button {
                 editingOther = true
+                engaged = true
                 NotchWindow.setKeyboardFocus(true)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { otherFocused = true }
             } label: {
@@ -201,6 +204,7 @@ struct AskQuestionsView: View {
     // MARK: - Logic
 
     private func toggle(_ option: AskOption) {
+        engaged = true
         let qid = current.id
         if current.multiSelect {
             var set = selected[qid] ?? []

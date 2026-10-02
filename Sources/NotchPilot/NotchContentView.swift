@@ -152,6 +152,13 @@ struct NotchContentView: View {
     }
 
     @State private var permissionSuppressed = false
+    /// Georgi fork: "release" support. The user has started answering
+    /// (picked an option / typed) — don't auto-release on mouse-out.
+    @State private var permissionEngaged = false
+    /// The cursor has been over the permission panel at least once, so a
+    /// later mouse-out means "leave me alone" (not just "never looked").
+    @State private var permissionHoveredOnce = false
+    @State private var releaseTask: Task<Void, Never>?
     /// Set to true by onChange after the suppress check runs. Prevents
     /// the permission panel from flickering open for one frame before
     /// the suppress check has a chance to fire.
@@ -396,7 +403,9 @@ struct NotchContentView: View {
     var body: some View {
         Group {
             if shouldShow {
-                if hasPendingPermission, let permission = hookBridge.pendingPermission {
+                // Georgi fork: a released request reopens on hover.
+                if let permission = hookBridge.pendingPermission,
+                   hasPendingPermission || (permissionChecked && expanded) {
                     permissionPanel(permission)
                         .transition(
                             .scale(scale: 0.04, anchor: expandedNotchAnchor)
@@ -495,6 +504,13 @@ struct NotchContentView: View {
                 expanded = false
                 permissionSuppressed = false
                 permissionChecked = false
+            }
+            // Georgi fork: a new head of the queue is a fresh request.
+            if newID != oldID {
+                permissionEngaged = false
+                permissionHoveredOnce = false
+                releaseTask?.cancel()
+                releaseTask = nil
             }
             if let p = hookBridge.pendingPermission, newID != oldID {
                 // Check if we should suppress this permission because
@@ -1697,6 +1713,21 @@ struct NotchContentView: View {
 
         // Georgi fork: "Always allow <Tool>" removed — it whitelisted the
         // whole tool (e.g. every Bash command) in settings.json.
+
+        // Georgi fork: answer in the terminal instead — hide, keep pending.
+        Button { releasePermission(permission, jumpToTerminal: true) } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "bubble.left")
+                    .font(.system(size: 10, weight: .semibold))
+                Text("Ответить в чате")
+            }
+            .font(.system(size: 11, weight: .medium, design: .rounded))
+            .foregroundColor(.white.opacity(0.55))
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 7)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Permission helpers
@@ -2173,8 +2204,9 @@ struct NotchContentView: View {
                     permission: permission,
                     accent: accent,
                     accentBorder: accentBorder,
+                    engaged: $permissionEngaged,
                     onSubmit: { hookBridge.submitAnswers(permission, answers: $0) },
-                    onCancel: { hookBridge.deny(permission) }
+                    onRelease: { releasePermission(permission, jumpToTerminal: true) }
                 )
                 .id(permission.id)
             } else {
@@ -2187,8 +2219,51 @@ struct NotchContentView: View {
         .frame(width: expandedWidth, height: expandedHeight, alignment: .top)
         .background(shape.fill(Color.black))
         .contentShape(shape)
+        .onHover { hovering in
+            // Georgi fork: mouse-out releases the request (1 s), unless the
+            // user already started answering. Already-released requests
+            // just collapse like the normal panel.
+            releaseTask?.cancel()
+            releaseTask = nil
+            if hovering {
+                permissionHoveredOnce = true
+                return
+            }
+            if permissionSuppressed {
+                guard !permissionEngaged else { return }
+                releaseTask = Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(220))
+                    if Task.isCancelled { return }
+                    expanded = false
+                }
+                return
+            }
+            guard permissionHoveredOnce, !permissionEngaged else { return }
+            releaseTask = Task { @MainActor in
+                try? await Task.sleep(for: .seconds(1))
+                if Task.isCancelled || permissionEngaged { return }
+                releasePermission(permission, jumpToTerminal: false)
+            }
+        }
         .contextMenu {
             Button("Quit Notch Pilot") { NSApp.terminate(nil) }
+        }
+    }
+
+    /// Georgi fork: "leave me alone" — hide the request without answering.
+    /// It stays queued (the hook keeps waiting, the terminal dialog stays
+    /// live), the pill shows the pending alert, hovering reopens it.
+    private func releasePermission(_ permission: PendingPermission, jumpToTerminal: Bool) {
+        releaseTask?.cancel()
+        releaseTask = nil
+        NotchWindow.setKeyboardFocus(false)
+        permissionSuppressed = true
+        expanded = false
+        if jumpToTerminal {
+            TerminalJumper.jump(
+                toCwd: permission.cwd,
+                claudePID: hookBridge.sessionPIDs[permission.sessionID]
+            )
         }
     }
 
