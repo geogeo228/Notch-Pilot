@@ -403,7 +403,7 @@ final class BuddyPreferences: ObservableObject {
         startAtLogin = false  // Georgi fork: see applyStartAtLogin()
         hapticsEnabled = defaults.object(forKey: Self.hapticsKey) as? Bool ?? true
         speechEnabled = defaults.object(forKey: Self.speechKey) as? Bool ?? true
-        suppressPermissionWhenFocused = defaults.object(forKey: Self.suppressPermKey) as? Bool ?? false
+        suppressPermissionWhenFocused = defaults.object(forKey: Self.suppressPermKey) as? Bool ?? true  // Georgi fork: was false
         hideInFullscreen = defaults.object(forKey: Self.hideFullscreenKey) as? Bool ?? true
 
         if let storedFraction = defaults.object(forKey: Self.notchAnchorFractionKey) as? Double {

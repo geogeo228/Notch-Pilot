@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import ApplicationServices  // Georgi fork: AX focused-window title
 
 /// Finds the terminal application hosting a given Claude session and brings
 /// it to the front.
@@ -124,24 +125,9 @@ enum TerminalJumper {
     /// existing window and switches Space. Returns false if not Zed / no match.
     private static func focusZedWindow(app: NSRunningApplication, cwd: String) -> Bool {
         guard let bid = app.bundleIdentifier, bid.hasPrefix("dev.zed.Zed"),
-              let bundleURL = app.bundleURL else { return false }
-        let channel = bid.hasSuffix("Preview") ? "0-preview" : "0-stable"
-        let db = NSHomeDirectory() + "/Library/Application Support/Zed/db/\(channel)/db.sqlite"
-        guard FileManager.default.fileExists(atPath: db),
-              let result = ProcessRunner.run("/usr/bin/sqlite3", [
-                  "-readonly", db,
-                  "select paths from workspaces where session_id is not null and paths != ''",
-              ]),
-              result.status == 0,
-              let text = String(data: result.stdout, encoding: .utf8)
+              let bundleURL = app.bundleURL,
+              let root = zedWorkspaceRoot(forCwd: cwd, bundleID: bid)
         else { return false }
-
-        // `paths` is newline-separated for multi-root workspaces.
-        let roots = text.split(whereSeparator: \.isNewline).map(String.init)
-        let match = roots
-            .filter { cwd == $0 || cwd.hasPrefix($0.hasSuffix("/") ? $0 : $0 + "/") }
-            .max { $0.count < $1.count }
-        guard let root = match else { return false }
 
         // Not Zed's own `cli`: it refuses to run inside sandbox-exec
         // ("cannot start app bundle"), and the fork runs sandboxed.
@@ -152,6 +138,41 @@ enum TerminalJumper {
         else { return false }
         print("[NotchPilot] Focused Zed window for \(root)")
         return true
+    }
+
+    /// Georgi fork: the open Zed workspace folder that best contains `cwd`
+    /// (longest matching root from Zed's workspace db), or nil. Shared by
+    /// `focusZedWindow` and the focused-window check in `isTerminalFocused`.
+    private static func zedWorkspaceRoot(forCwd cwd: String, bundleID bid: String) -> String? {
+        let channel = bid.hasSuffix("Preview") ? "0-preview" : "0-stable"
+        let db = NSHomeDirectory() + "/Library/Application Support/Zed/db/\(channel)/db.sqlite"
+        guard FileManager.default.fileExists(atPath: db),
+              let result = ProcessRunner.run("/usr/bin/sqlite3", [
+                  "-readonly", db,
+                  "select paths from workspaces where session_id is not null and paths != ''",
+              ]),
+              result.status == 0,
+              let text = String(data: result.stdout, encoding: .utf8)
+        else { return nil }
+
+        // `paths` is newline-separated for multi-root workspaces.
+        let roots = text.split(whereSeparator: \.isNewline).map(String.init)
+        return roots
+            .filter { cwd == $0 || cwd.hasPrefix($0.hasSuffix("/") ? $0 : $0 + "/") }
+            .max { $0.count < $1.count }
+    }
+
+    /// Georgi fork: title of the focused window of `app` via Accessibility,
+    /// or nil (no AX permission, window on another Space, etc).
+    private static func focusedWindowTitle(of app: NSRunningApplication) -> String? {
+        let axApp = AXUIElementCreateApplication(app.processIdentifier)
+        var win: AnyObject?
+        guard AXUIElementCopyAttributeValue(axApp, kAXFocusedWindowAttribute as CFString, &win) == .success,
+              let window = win else { return nil }
+        var title: AnyObject?
+        guard AXUIElementCopyAttributeValue(window as! AXUIElement, kAXTitleAttribute as CFString, &title) == .success
+        else { return nil }
+        return title as? String
     }
 
     /// Find the claude PID that has the session's jsonl file open.
@@ -214,7 +235,19 @@ enum TerminalJumper {
         // Non-tmux: walk up to find the terminal ancestor
         if let termPID = findTerminalAncestor(startingAt: claudePID),
            let termApp = NSRunningApplication(processIdentifier: termPID) {
-            return termApp.processIdentifier == frontmost.processIdentifier
+            guard termApp.processIdentifier == frontmost.processIdentifier else { return false }
+            // Georgi fork: Zed — all windows are one process, so compare
+            // the focused window's title (Zed shows the project folder
+            // name, maybe followed by " — file") with this session's
+            // workspace. Unreadable title / no match in db = focused
+            // (previous behavior).
+            if let bid = termApp.bundleIdentifier, bid.hasPrefix("dev.zed.Zed"),
+               let root = zedWorkspaceRoot(forCwd: cwd, bundleID: bid),
+               let title = focusedWindowTitle(of: termApp) {
+                let project = title.components(separatedBy: " — ").first ?? title
+                return project == (root as NSString).lastPathComponent
+            }
+            return true
         }
 
         // tmux: find which pane this claude is in, then check if that
