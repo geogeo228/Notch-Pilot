@@ -98,6 +98,7 @@ enum TerminalJumper {
         for pid in pidsToTry {
             if let terminalPID = findTerminalAncestor(startingAt: pid),
                let app = NSRunningApplication(processIdentifier: terminalPID) {
+                if focusZedWindow(app: app, cwd: cwd) { return }
                 app.activate()
                 print("[NotchPilot] Activated \(app.localizedName ?? "terminal") (parent chain)")
                 return
@@ -106,12 +107,49 @@ enum TerminalJumper {
 
         // Step 3: fallback — any running terminal app.
         if let app = fallbackTerminalApp() {
+            if focusZedWindow(app: app, cwd: cwd) { return }
             app.activate()
             print("[NotchPilot] Activated \(app.localizedName ?? "terminal") (bundle-ID fallback)")
             return
         }
 
         print("[NotchPilot] No terminal found for cwd \(cwd)")
+    }
+
+    /// Georgi fork: Zed — `activate()` only brings up its last-used window,
+    /// which is wrong with several windows (often fullscreen on other Spaces,
+    /// invisible to Accessibility). Instead pick the open workspace whose
+    /// folder best contains the session cwd (from Zed's own workspace db)
+    /// and ask Zed's CLI to open that folder: Zed focuses the existing
+    /// window and switches Space. Returns false if not Zed / no match.
+    private static func focusZedWindow(app: NSRunningApplication, cwd: String) -> Bool {
+        guard let bid = app.bundleIdentifier, bid.hasPrefix("dev.zed.Zed"),
+              let bundleURL = app.bundleURL else { return false }
+        let channel = bid.hasSuffix("Preview") ? "0-preview" : "0-stable"
+        let db = NSHomeDirectory() + "/Library/Application Support/Zed/db/\(channel)/db.sqlite"
+        guard FileManager.default.fileExists(atPath: db),
+              let result = ProcessRunner.run("/usr/bin/sqlite3", [
+                  "-readonly", db,
+                  "select paths from workspaces where session_id is not null and paths != ''",
+              ]),
+              result.status == 0,
+              let text = String(data: result.stdout, encoding: .utf8)
+        else { return false }
+
+        // `paths` is newline-separated for multi-root workspaces.
+        let roots = text.split(whereSeparator: \.isNewline).map(String.init)
+        let match = roots
+            .filter { cwd == $0 || cwd.hasPrefix($0.hasSuffix("/") ? $0 : $0 + "/") }
+            .max { $0.count < $1.count }
+        guard let root = match else { return false }
+
+        let cli = bundleURL.appendingPathComponent("Contents/MacOS/cli").path
+        guard FileManager.default.isExecutableFile(atPath: cli),
+              let opened = ProcessRunner.run(cli, [root], timeout: 3),
+              opened.status == 0
+        else { return false }
+        print("[NotchPilot] Focused Zed window for \(root)")
+        return true
     }
 
     /// Find the claude PID that has the session's jsonl file open.
