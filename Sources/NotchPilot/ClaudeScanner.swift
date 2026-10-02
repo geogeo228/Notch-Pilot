@@ -32,8 +32,25 @@ actor ClaudeScanner {
     private var lastLiveClaudePIDs: [String: [Int32]] = [:]
 
     func scan() -> (sessions: [ClaudeSession], processCount: Int) {
-        (loadSessions(), countClaudeProcesses())
+        let sessions = loadSessions()
+        // Georgi fork: diagnostics — when a session drops out of the list,
+        // log why (stderr is unbuffered, lands in /tmp/notchpilot.log).
+        let ids = Set(sessions.map(\.id))
+        for gone in lastShownIDs.subtracting(ids) {
+            let name = lastShownNames[gone] ?? gone
+            let why = exclusions[gone] ?? "jsonl not found this pass"
+            FileHandle.standardError.write(Data(
+                "[NotchPilot] session dropped: \(name) (\(gone.prefix(8))) — \(why)\n".utf8))
+        }
+        lastShownIDs = ids
+        lastShownNames = Dictionary(sessions.map { ($0.id, $0.projectName) }, uniquingKeysWith: { a, _ in a })
+        return (sessions, countClaudeProcesses())
     }
+
+    // Georgi fork: diagnostics state.
+    private var exclusions: [String: String] = [:]
+    private var lastShownIDs: Set<String> = []
+    private var lastShownNames: [String: String] = [:]
 
     private func loadSessions() -> [ClaudeSession] {
         let home = FileManager.default.homeDirectoryForCurrentUser
@@ -57,6 +74,7 @@ actor ClaudeScanner {
 
         let now = Date()
         var livePaths = Set<String>()
+        exclusions = [:]  // Georgi fork: diagnostics, see scan()
 
         // Collected candidate jsonls before we apply the per-cwd capacity
         // filter. Each tuple carries everything we need to emit a session.
@@ -96,6 +114,8 @@ actor ClaudeScanner {
                 // definitely isn't a live session and we skip the parse to
                 // save work. (The cwd-count filter below is the real gate.)
                 if now.timeIntervalSince(lastActivity) > shownThreshold {
+                    exclusions[jsonlURL.deletingPathExtension().lastPathComponent] =
+                        "idle > \(Int(shownThreshold / 60)) min"
                     continue
                 }
 
@@ -105,7 +125,10 @@ actor ClaudeScanner {
                 // If the jsonl has no cwd yet (brand-new session, first
                 // line not yet flushed) we can't match it to a live process,
                 // so skip it. It will appear on a subsequent tick.
-                guard !parsed.cwd.isEmpty else { continue }
+                guard !parsed.cwd.isEmpty else {
+                    exclusions[jsonlURL.deletingPathExtension().lastPathComponent] = "no cwd in jsonl yet"
+                    continue
+                }
 
                 // Georgi fork: match on the session's LAUNCH cwd. Each jsonl
                 // entry records the cwd at that moment, which follows the
@@ -160,8 +183,13 @@ actor ClaudeScanner {
         var result: [ClaudeSession] = []
         for (cwd, group) in grouped {
             let capacity = liveCwdCounts[cwd] ?? 0
-            guard capacity > 0 else { continue }
             let sorted = group.sorted { $0.lastActivity > $1.lastActivity }
+            for c in sorted.dropFirst(capacity) {
+                exclusions[c.sessionID] = capacity == 0
+                    ? "no live claude process with cwd \(cwd) (live cwds: \(liveCwdCounts.keys.sorted()))"
+                    : "over capacity \(capacity) for cwd \(cwd)"
+            }
+            guard capacity > 0 else { continue }
             let pids = lastLiveClaudePIDs[cwd] ?? []
             for (idx, c) in sorted.prefix(capacity).enumerated() {
                 let isActive = now.timeIntervalSince(c.lastActivity) < activeThreshold
